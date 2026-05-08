@@ -1,0 +1,16 @@
+numpy
+pandas
+pyyaml
+tqdm
+scikit-learn
+
+# HF dataset loader for OmniFall/WanFall
+datasets
+
+# Training
+torch
+
+# Pose extraction (optional, pick one backend)
+opencv-python
+mediapipe
+ultralytics

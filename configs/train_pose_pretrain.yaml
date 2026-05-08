@@ -1,0 +1,27 @@
+data_config: configs/data_config.yaml
+
+task:
+  name: pose_pretrain
+  num_classes: 1
+
+data:
+  val_ratio: 0.1
+  pose_target_len: 60
+
+train:
+  seed: 42
+  batch_size: 128
+  num_workers: 4
+  max_epochs: 15
+  lr: 0.001
+  weight_decay: 0.0001
+  device: auto
+
+model:
+  num_joints: 17
+  embed_dim: 128
+  backbone: temporal_cnn
+
+output:
+  weights_dir: weights
+  ckpt_name: pose_pretrained_omnifall.pth
