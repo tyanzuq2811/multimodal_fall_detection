@@ -8,14 +8,15 @@ train:
   seed: 42
   batch_size: 256
   num_workers: 4
-  max_epochs: 15
-  lr: 0.001
+  max_epochs: 150
+  lr: 0.0001
   weight_decay: 0.0001
   device: auto
 
 model:
   imu_channels: 6
   embed_dim: 64
+  dropout: 0.2
 
 output:
   weights_dir: weights

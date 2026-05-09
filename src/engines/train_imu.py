@@ -16,8 +16,28 @@ from src.utils.seed import set_global_seed
 
 
 def _forward_imu(model: IMUClassifier, batch, device: torch.device) -> torch.Tensor:
-    imu = batch["imu"].to(device)
-    logits, _ = model(imu)
+    imu = batch["imu"].to(device).float()  # Shape: (B, 6, T) - [accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
+    
+    # ===== INSTANCE NORMALIZATION (Chuẩn hóa từng mẫu riêng biệt) =====
+    # SỬA LỖI: Chỉ tính Mean/Std dọc theo trục Thời gian (dim=2) thôi, KHÔNG normalize theo batch
+    # Điều này có ý nghĩa vật lý: triệt tiêu trọng trường (Gravity) và độ nghiêng cảm biến
+    # Chỉ giữ lại Dynamic Acceleration - thứ duy nhất cần để bắt cú ngã
+    
+    accel = imu[:, :3, :]  # (B, 3, T)
+    gyro = imu[:, 3:, :]   # (B, 3, T)
+    
+    # Instance normalization: mỗi sample được chuẩn hóa độc lập
+    accel_mean = accel.mean(dim=2, keepdim=True)  # Shape: (B, 3, 1)
+    accel_std = accel.std(dim=2, keepdim=True)    # Shape: (B, 3, 1)
+    accel = (accel - accel_mean) / (accel_std + 1e-6)
+    
+    gyro_mean = gyro.mean(dim=2, keepdim=True)    # Shape: (B, 3, 1)
+    gyro_std = gyro.std(dim=2, keepdim=True)      # Shape: (B, 3, 1)
+    gyro = (gyro - gyro_mean) / (gyro_std + 1e-6)
+    
+    imu_norm = torch.cat([accel, gyro], dim=1)  # Reconstruct: (B, 6, T)
+    
+    logits, _ = model(imu_norm)
     return logits
 
 

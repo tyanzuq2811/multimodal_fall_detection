@@ -5,15 +5,17 @@ from torch import nn
 
 
 class IMUBackbone(nn.Module):
-    def __init__(self, imu_channels: int, embed_dim: int):
+    def __init__(self, imu_channels: int, embed_dim: int, dropout: float = 0.2):
         super().__init__()
         self.imu_channels = int(imu_channels)
         self.net = nn.Sequential(
             nn.Conv1d(self.imu_channels, 32, kernel_size=5, padding=2),
             nn.ReLU(inplace=True),
+            nn.Dropout(dropout),  # Reduced from 0.5 to 0.2
             nn.MaxPool1d(2),
             nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.ReLU(inplace=True),
+            nn.Dropout(dropout),  # Reduced from 0.5 to 0.2
             nn.MaxPool1d(2),
             nn.Conv1d(64, embed_dim, kernel_size=1),
             nn.ReLU(inplace=True),
@@ -35,9 +37,12 @@ class IMUBackbone(nn.Module):
 
 
 class IMUClassifierHead(nn.Module):
-    def __init__(self, embed_dim: int, num_classes: int = 1):
+    def __init__(self, embed_dim: int, num_classes: int = 1, dropout: float = 0.2):
         super().__init__()
-        self.fc = nn.Linear(embed_dim, num_classes)
+        self.fc = nn.Sequential(
+            nn.Dropout(dropout),  # Reduced from 0.5 to 0.2
+            nn.Linear(embed_dim, num_classes)
+        )
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         return self.fc(z)
