@@ -176,6 +176,7 @@ def main() -> None:
     processed_dir = project_root / Path(cfg["paths"]["processed_dir"])
 
     cameras = [int(x) for x in cfg["upfall"]["cameras"]]
+    allowed_subjects = set(int(x) for x in cfg["upfall"].get("extract_subjects", []))
     backend = str(cfg["upfall"]["pose"].get("backend", "ultralytics"))
 
     trials = iter_upfall_trials(raw_upfall_dir)
@@ -186,6 +187,8 @@ def main() -> None:
     skipped = 0
 
     for t in trials:
+        if allowed_subjects and t.subject not in allowed_subjects:
+            continue
         csv_start_dt = _read_csv_start_dt(t.csv_path)
         for cam_id in cameras:
             if cam_id not in t.camera_zips:

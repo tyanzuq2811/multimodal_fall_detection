@@ -80,10 +80,10 @@ def main() -> None:
         embed_dim=int(cfg["model"]["embed_dim"]),
         num_classes=int(cfg["task"]["num_classes"]),
         backbone_type=str(cfg["model"].get("backbone", "temporal_cnn")),
+        num_channels=int(cfg["model"].get("num_channels", 3)),
     ).to(device)
 
-    train_labels = [int(it.label) for it in train_ds.items]
-    pos_weight = compute_pos_weight(train_labels).to(device)
+    pos_weight = compute_pos_weight([int(it.label) for it in train_ds.items]).to(device)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     optim = torch.optim.AdamW(

@@ -15,6 +15,7 @@ def pose_cache_path(processed_dir: Path, subject: int, activity: int, trial: int
     return (
         processed_dir
         / "pose_features"
+        / "upfall"
         / f"Subject{subject}"
         / f"Activity{activity}"
         / f"Trial{trial}"
@@ -34,6 +35,7 @@ def main() -> None:
     raw_upfall_dir = project_root / Path(cfg["paths"]["raw_upfall_dir"])
     processed_dir = project_root / Path(cfg["paths"]["processed_dir"])
     cameras = [int(x) for x in cfg["upfall"]["cameras"]]
+    allowed_subjects = set(int(x) for x in cfg["upfall"].get("extract_subjects", []))
 
     fall_acts = set(int(x) for x in cfg["upfall"]["labels"]["fall_activities"])
     non_fall_acts = set(int(x) for x in cfg["upfall"]["labels"]["non_fall_activities"])
@@ -56,6 +58,8 @@ def main() -> None:
     n_neg = 0
 
     for t in trials:
+        if allowed_subjects and t.subject not in allowed_subjects:
+            continue
         if t.activity in fall_acts:
             label = 1
         elif t.activity in non_fall_acts:

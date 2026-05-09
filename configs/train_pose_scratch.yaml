@@ -18,11 +18,7 @@ model:
   embed_dim: 128
   use_two_cameras: true
   backbone: temporal_cnn
-  num_channels: 3
 
 output:
   weights_dir: weights
-  ckpt_name: pose_finetuned_upfall.pth
-
-input_checkpoints:
-  pose_pretrained: weights/pose_pretrained_omnifall.pth
+  ckpt_name: pose_finetuned_upfall_scratch.pth

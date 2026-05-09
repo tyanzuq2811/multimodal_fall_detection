@@ -4,11 +4,10 @@ import argparse
 from pathlib import Path
 
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
 
 from src.data_pipeline.upfall_dataset import UPFallWindowDataset
-from src.engines.common import compute_pos_weight, evaluate_classifier, save_checkpoint
+from src.engines.common import BinaryFocalLoss, compute_focal_alpha, evaluate_classifier, save_checkpoint
 from src.models.pose_model import TwoCamPoseClassifier
 from src.utils.config import load_yaml
 from src.utils.device import resolve_device
@@ -111,6 +110,7 @@ def main() -> None:
         embed_dim=int(cfg["model"]["embed_dim"]),
         num_classes=int(cfg["task"]["num_classes"]),
         backbone_type=str(cfg["model"].get("backbone", "temporal_cnn")),
+        num_channels=int(cfg["model"].get("num_channels", 3)),
     ).to(device)
 
     pre_cfg = cfg.get("input_checkpoints", {})
@@ -123,9 +123,8 @@ def main() -> None:
         else:
             print(f"[WARN] Pretrained backbone not found: {ckpt_path}")
 
-    train_labels = [int(it.label) for it in train_ds.items]
-    pos_weight = compute_pos_weight(train_labels).to(device)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    alpha = compute_focal_alpha([int(it.label) for it in train_ds.items]).to(device)
+    criterion = BinaryFocalLoss(alpha=float(alpha.item()), gamma=2.0)
 
     optim = torch.optim.AdamW(
         model.parameters(),

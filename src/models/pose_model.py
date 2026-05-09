@@ -13,12 +13,14 @@ class TwoCamPoseClassifier(nn.Module):
         embed_dim: int,
         num_classes: int = 1,
         backbone_type: str = "temporal_cnn",
+        num_channels: int = 3,
     ):
         super().__init__()
         self.backbone = PoseBackbone(
             num_joints=num_joints,
             embed_dim=embed_dim,
             backbone_type=backbone_type,
+                    num_channels=num_channels,
         )
         self.head = PoseClassifierHead(embed_dim=embed_dim, num_classes=num_classes)
 

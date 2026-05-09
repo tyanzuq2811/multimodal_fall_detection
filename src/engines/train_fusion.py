@@ -4,11 +4,10 @@ import argparse
 from pathlib import Path
 
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
 
 from src.data_pipeline.upfall_dataset import UPFallWindowDataset
-from src.engines.common import compute_pos_weight, evaluate_classifier, save_checkpoint
+from src.engines.common import BinaryFocalLoss, compute_focal_alpha, evaluate_classifier, save_checkpoint
 from src.models.fusion_mlp import FusionMLP
 from src.models.imu_model import IMUClassifier
 from src.models.pose_model import TwoCamPoseClassifier
@@ -66,7 +65,7 @@ def _forward_fusion(
     return logits
 
 
-def _load_checkpoint(model: nn.Module, path: Path) -> None:
+def _load_checkpoint(model: torch.nn.Module, path: Path) -> None:
     ckpt = torch.load(path, map_location="cpu")
     state = ckpt.get("model", ckpt)
     model.load_state_dict(state, strict=True)
@@ -159,9 +158,8 @@ def main() -> None:
         p.requires_grad = False
 
     fusion_model.to(device)
-    train_labels = [int(it.label) for it in train_ds.items]
-    pos_weight = compute_pos_weight(train_labels).to(device)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    alpha = compute_focal_alpha([int(it.label) for it in train_ds.items]).to(device)
+    criterion = BinaryFocalLoss(alpha=float(alpha.item()), gamma=2.0)
 
     optim = torch.optim.AdamW(
         fusion_model.parameters(),

@@ -6,7 +6,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from src.utils.metrics import accuracy, f1_binary
 
@@ -32,6 +33,51 @@ def compute_pos_weight(labels: list[int]) -> torch.Tensor:
     if pos <= 0:
         return torch.tensor(1.0, dtype=torch.float32)
     return torch.tensor(neg / pos, dtype=torch.float32)
+
+
+def compute_focal_alpha(labels: list[int]) -> torch.Tensor:
+    arr = np.asarray(labels, dtype=np.int64)
+    pos = float((arr == 1).sum())
+    neg = float((arr == 0).sum())
+    total = pos + neg
+    if total <= 0:
+        return torch.tensor(0.5, dtype=torch.float32)
+    # Positive class (fall) gets the negative prevalence as weight.
+    return torch.tensor(neg / total, dtype=torch.float32)
+
+
+class BinaryFocalLoss(torch.nn.Module):
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0, reduction: str = "mean"):
+        super().__init__()
+        self.alpha = float(alpha)
+        self.gamma = float(gamma)
+        self.reduction = reduction
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        targets = targets.float()
+        probs = torch.sigmoid(logits)
+        bce_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+        p_t = probs * targets + (1 - probs) * (1 - targets)
+        focal_weight = (1 - p_t).clamp(min=0.0) ** self.gamma
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        loss = alpha_t * focal_weight * bce_loss
+
+        if self.reduction == "mean":
+            return loss.mean()
+        if self.reduction == "sum":
+            return loss.sum()
+        return loss
+
+
+def make_balanced_sampler(labels: list[int]) -> WeightedRandomSampler | None:
+    arr = np.asarray(labels, dtype=np.int64)
+    if arr.size == 0:
+        return None
+    counts = np.bincount(arr, minlength=2).astype(np.float32)
+    counts = np.maximum(counts, 1.0)
+    sample_weights = 1.0 / counts[arr]
+    weights = torch.as_tensor(sample_weights, dtype=torch.double)
+    return WeightedRandomSampler(weights=weights, num_samples=len(weights), replacement=True)
 
 
 @torch.no_grad()

@@ -57,11 +57,11 @@ def resample_pose(
     target_len: int,
     mode: Literal["linear", "nearest"] = "nearest",
 ) -> np.ndarray:
-    # kpts: (N, J, 2)
+    # kpts: (N, J, C) where C is any number of channels (2 for (x,y), 3 for (x,y,conf), etc)
     kpts = np.asarray(kpts)
-    if kpts.ndim != 3 or kpts.shape[-1] != 2:
-        raise ValueError("kpts must have shape (N, J, 2)")
-    n, j, _ = kpts.shape
-    flat = kpts.reshape(n, j * 2)
+    if kpts.ndim != 3:
+        raise ValueError("kpts must have shape (N, J, C)")
+    n, j, c = kpts.shape
+    flat = kpts.reshape(n, j * c)
     out = resample_time_series(t, flat, start_s, end_s, target_len, mode=mode)
-    return out.reshape(target_len, j, 2).astype(np.float32)
+    return out.reshape(target_len, j, c).astype(np.float32)

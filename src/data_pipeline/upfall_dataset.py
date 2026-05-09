@@ -22,11 +22,17 @@ def _load_imu_npz(path: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 @lru_cache(maxsize=256)
-def _load_pose_npz(path: str) -> tuple[np.ndarray, np.ndarray]:
+def _load_pose_npz(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     with np.load(path) as npz:
         t = npz["t"].astype(np.float32)
-        kpts = npz["kpts"].astype(np.float32)
-    return t, kpts
+        kpts = npz["kpts"].astype(np.float32)  # (N, J, 2)
+        conf = npz.get("conf")  # (N, J) - YOLO confidence
+        if conf is not None:
+            conf = conf.astype(np.float32)
+        else:
+            # If conf not available, use ones (full confidence)
+            conf = np.ones((kpts.shape[0], kpts.shape[1]), dtype=np.float32)
+    return t, kpts, conf
 
 
 @dataclass(frozen=True)
@@ -107,13 +113,16 @@ class UPFallWindowDataset(Dataset):
         }
 
         if it.pose_cam1_path and Path(it.pose_cam1_path).exists():
-            t_p1, k1 = _load_pose_npz(it.pose_cam1_path)
-            p1 = resample_pose(t_p1, k1, it.start_s, it.end_s, self.pose_target_len, mode="nearest")
-            p1 = np.transpose(p1, (2, 0, 1))  # (2, T, J)
+            t_p1, k1, c1 = _load_pose_npz(it.pose_cam1_path)
+            # Concatenate kpts (N,J,2) and conf (N,J,1) -> (N,J,3)
+            kpts_with_conf = np.concatenate([k1, c1[:, :, np.newaxis]], axis=2)
+            p1 = resample_pose(t_p1, kpts_with_conf, it.start_s, it.end_s, self.pose_target_len, mode="nearest")
+            p1 = np.transpose(p1, (2, 0, 1))  # (3, T, J) - channels: x, y, confidence
             out["pose_cam1"] = torch.from_numpy(p1)
         if it.pose_cam2_path and Path(it.pose_cam2_path).exists():
-            t_p2, k2 = _load_pose_npz(it.pose_cam2_path)
-            p2 = resample_pose(t_p2, k2, it.start_s, it.end_s, self.pose_target_len, mode="nearest")
+            t_p2, k2, c2 = _load_pose_npz(it.pose_cam2_path)
+            kpts_with_conf = np.concatenate([k2, c2[:, :, np.newaxis]], axis=2)
+            p2 = resample_pose(t_p2, kpts_with_conf, it.start_s, it.end_s, self.pose_target_len, mode="nearest")
             p2 = np.transpose(p2, (2, 0, 1))
             out["pose_cam2"] = torch.from_numpy(p2)
 
