@@ -11,11 +11,17 @@ from src.utils.config import load_yaml
 from src.utils.jsonl import write_jsonl
 
 
-def pose_cache_path(processed_dir: Path, subject: int, activity: int, trial: int, camera_id: int) -> Path:
+def pose_cache_path(
+    processed_dir: Path,
+    subject: int,
+    activity: int,
+    trial: int,
+    camera_id: int,
+    pose_root: Path | None = None,
+) -> Path:
+    root = pose_root if pose_root is not None else processed_dir / "pose_features" / "upfall"
     return (
-        processed_dir
-        / "pose_features"
-        / "upfall"
+        root
         / f"Subject{subject}"
         / f"Activity{activity}"
         / f"Trial{trial}"
@@ -42,11 +48,13 @@ def main() -> None:
     win_len = float(cfg["upfall"]["windows"]["length_s"])
     win_stride = float(cfg["upfall"]["windows"]["stride_s"])
 
-    out_path = (
-        Path(args.out)
-        if args.out
-        else processed_dir / "synced_windows" / "upfall_windows.jsonl"
-    )
+    cfg_manifest = cfg.get("upfall", {}).get("manifest_path")
+    if args.out:
+        out_path = Path(args.out)
+    elif cfg_manifest:
+        out_path = project_root / Path(cfg_manifest)
+    else:
+        out_path = processed_dir / "synced_windows" / "upfall_windows.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     trials = iter_upfall_trials(raw_upfall_dir)
@@ -80,7 +88,12 @@ def main() -> None:
         if duration < win_len:
             continue
 
-        pose_paths = {cid: pose_cache_path(processed_dir, t.subject, t.activity, t.trial, cid) for cid in cameras}
+        pose_root = cfg.get("upfall", {}).get("pose_cache_dir")
+        pose_root = project_root / Path(pose_root) if pose_root else None
+        pose_paths = {
+            cid: pose_cache_path(processed_dir, t.subject, t.activity, t.trial, cid, pose_root=pose_root)
+            for cid in cameras
+        }
         # We don't require pose files at manifest-build time, to allow IMU-only training.
 
         num_windows = int((duration - win_len) // win_stride) + 1

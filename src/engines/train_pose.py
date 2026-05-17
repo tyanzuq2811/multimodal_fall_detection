@@ -12,6 +12,7 @@ from src.models.pose_model import TwoCamPoseClassifier
 from src.utils.config import load_yaml
 from src.utils.device import resolve_device
 from src.utils.seed import set_global_seed
+from src.utils.train_logger import TrainLogger
 
 
 def _forward_pose_logits(model: TwoCamPoseClassifier, batch, device: torch.device):
@@ -27,30 +28,10 @@ def _forward_pose_eval(model: TwoCamPoseClassifier, batch, device: torch.device)
     return torch.maximum(l1, l2)
 
 
-def _load_backbone_weights(model: TwoCamPoseClassifier, ckpt_path: Path) -> None:
+def _load_pretrained_weights(model: TwoCamPoseClassifier, ckpt_path: Path) -> None:
     ckpt = torch.load(ckpt_path, map_location="cpu")
     state = ckpt.get("model", ckpt)
-    
-    # Normalize state dict: handle different checkpoint formats
-    backbone_state = {}
-    for k, v in state.items():
-        # Remove leading "backbone." if present
-        k_norm = k.replace("backbone.", "", 1)
-        # If key starts with "encoder.", wrap with "backbone."
-        if k_norm.startswith("encoder."):
-            backbone_state[f"backbone.{k_norm}"] = v
-        elif k_norm.startswith("backbone."):
-            # Already has backbone prefix
-            backbone_state[k_norm] = v
-        else:
-            # Key might be just encoder.net.* without any wrapper
-            # Try to add backbone prefix
-            backbone_state[f"backbone.{k_norm}"] = v
-    
-    if not backbone_state:
-        raise SystemExit(f"No backbone weights found in: {ckpt_path}")
-    
-    model.backbone.load_state_dict(backbone_state, strict=False)
+    model.load_state_dict(state, strict=True)
 
 
 def main() -> None:
@@ -64,7 +45,11 @@ def main() -> None:
 
     data_cfg = load_yaml(project_root / cfg["data_config"])
     processed_dir = project_root / Path(data_cfg["paths"]["processed_dir"])
-    manifest_path = processed_dir / "synced_windows" / "upfall_windows.jsonl"
+    cfg_manifest = data_cfg.get("upfall", {}).get("manifest_path")
+    if cfg_manifest:
+        manifest_path = project_root / Path(cfg_manifest)
+    else:
+        manifest_path = processed_dir / "synced_windows" / "upfall_windows.jsonl"
 
     train_subjects = [int(x) for x in data_cfg["split"]["train_subjects"]]
     val_subjects = [int(x) for x in data_cfg["split"]["val_subjects"]]
@@ -118,8 +103,8 @@ def main() -> None:
     if pre_path:
         ckpt_path = (project_root / str(pre_path)).resolve()
         if ckpt_path.exists():
-            _load_backbone_weights(model, ckpt_path)
-            print(f"Loaded pretrained backbone: {ckpt_path}")
+            _load_pretrained_weights(model, ckpt_path)
+            print(f"Loaded pretrained weights: {ckpt_path}")
         else:
             print(f"[WARN] Pretrained backbone not found: {ckpt_path}")
 
@@ -137,28 +122,64 @@ def main() -> None:
     out_path = weights_dir / str(cfg["output"]["ckpt_name"])
     printed_shape = False
 
-    for epoch in range(int(cfg["train"]["max_epochs"])):
-        model.train()
-        for batch in train_loader:
-            if not printed_shape:
-                print(
-                    f"[shape] pose_cam1={tuple(batch['pose_cam1'].shape)} "
-                    f"pose_cam2={tuple(batch['pose_cam2'].shape)}"
-                )
-                printed_shape = True
-            y = batch["label"].to(device).float()
-            l1, l2 = _forward_pose_logits(model, batch, device)
-            loss = 0.5 * (criterion(l1, y.view(-1)) + criterion(l2, y.view(-1)))
-            optim.zero_grad(set_to_none=True)
-            loss.backward()
-            optim.step()
+    log_cfg = cfg.get("logging", {})
+    wandb_cfg = cfg.get("wandb", {})
+    log_dir = project_root / str(log_cfg.get("log_dir", "logs"))
+    run_name = str(log_cfg.get("run_name") or cfg["task"]["name"])
+    logger = TrainLogger(
+        log_dir=log_dir,
+        run_name=run_name,
+        save_csv=log_cfg.get("save_csv", True),
+        save_json=log_cfg.get("save_json", True),
+        wandb_cfg=wandb_cfg,
+        run_config=cfg,
+    )
 
-        val_res = evaluate_classifier(model, val_loader, device, criterion, _forward_pose_eval)
-        print(f"[epoch {epoch+1}] val loss={val_res.loss:.4f} acc={val_res.acc:.4f} f1={val_res.f1:.4f}")
-        if val_res.f1 > best_f1:
-            best_f1 = val_res.f1
-            save_checkpoint(model, out_path, extra={"config": cfg})
-            print(f"  saved best -> {out_path}")
+    try:
+        for epoch in range(int(cfg["train"]["max_epochs"])):
+            model.train()
+            train_losses: list[float] = []
+            for batch in train_loader:
+                if not printed_shape:
+                    print(
+                        f"[shape] pose_cam1={tuple(batch['pose_cam1'].shape)} "
+                        f"pose_cam2={tuple(batch['pose_cam2'].shape)}"
+                    )
+                    printed_shape = True
+                y = batch["label"].to(device).float()
+                l1, l2 = _forward_pose_logits(model, batch, device)
+                loss = 0.5 * (criterion(l1, y.view(-1)) + criterion(l2, y.view(-1)))
+                train_losses.append(float(loss.item()))
+                optim.zero_grad(set_to_none=True)
+                loss.backward()
+                optim.step()
+
+            train_loss = float(sum(train_losses) / len(train_losses)) if train_losses else 0.0
+            val_res = evaluate_classifier(model, val_loader, device, criterion, _forward_pose_eval)
+            print(
+                f"[epoch {epoch+1}] train loss={train_loss:.4f} "
+                f"val loss={val_res.loss:.4f} acc={val_res.acc:.4f} f1={val_res.f1:.4f}"
+            )
+            is_best = val_res.f1 > best_f1
+            if is_best:
+                best_f1 = val_res.f1
+                save_checkpoint(model, out_path, extra={"config": cfg})
+                print(f"  saved best -> {out_path}")
+
+            logger.log(
+                {
+                    "epoch": epoch + 1,
+                    "train_loss": train_loss,
+                    "val_loss": val_res.loss,
+                    "val_acc": val_res.acc,
+                    "val_f1": val_res.f1,
+                    "lr": float(optim.param_groups[0]["lr"]),
+                    "is_best": is_best,
+                },
+                step=epoch + 1,
+            )
+    finally:
+        logger.close()
 
 
 if __name__ == "__main__":

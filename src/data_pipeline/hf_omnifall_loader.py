@@ -282,6 +282,111 @@ def _get_video_path(
     return None, False
 
 
+def _extract_pose_ultralytics(
+    video_path: Path,
+    frame_stride: int,
+    max_frames: int,
+    start_s: float | None,
+    end_s: float | None,
+    model_name: str,
+    device: str,
+    conf_threshold: float = 0.5,
+):
+    try:
+        import cv2
+    except ImportError as e:
+        raise SystemExit("Missing dependency: opencv-python") from e
+
+    try:
+        from ultralytics import YOLO
+    except ImportError as e:
+        raise SystemExit("Missing dependency: ultralytics") from e
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return None
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps is None or fps <= 0:
+        fps = 30.0
+
+    model = YOLO(model_name)
+    kpts = []
+    conf = []
+    t_list = []
+
+    if start_s is not None and start_s > 0:
+        cap.set(cv2.CAP_PROP_POS_MSEC, float(start_s) * 1000.0)
+
+    frame_idx = 0
+    kept = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        t_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+        if end_s is not None and t_ms > 0 and (t_ms / 1000.0) >= end_s:
+            break
+        if frame_idx % frame_stride != 0:
+            frame_idx += 1
+            continue
+        if kept >= max_frames:
+            break
+        frame_idx += 1
+        kept += 1
+
+        h, w = frame.shape[:2]
+        if h <= 0 or w <= 0:
+            kpts.append(np.zeros((17, 2), dtype=np.float32))
+            conf.append(np.zeros((17,), dtype=np.float32))
+        else:
+            results = model(frame, conf=conf_threshold, classes=[0], verbose=False, device=device)
+            if not results:
+                kpts.append(np.zeros((17, 2), dtype=np.float32))
+                conf.append(np.zeros((17,), dtype=np.float32))
+            else:
+                r0 = results[0]
+                if getattr(r0, "keypoints", None) is None:
+                    kpts.append(np.zeros((17, 2), dtype=np.float32))
+                    conf.append(np.zeros((17,), dtype=np.float32))
+                elif r0.keypoints.xy is None or len(r0.keypoints.xy) == 0:
+                    kpts.append(np.zeros((17, 2), dtype=np.float32))
+                    conf.append(np.zeros((17,), dtype=np.float32))
+                else:
+                    xy = r0.keypoints.xy.detach().cpu().numpy()  # (n, 17, 2)
+                    cf = getattr(r0.keypoints, "conf", None)
+                    if cf is not None:
+                        cf = cf.detach().cpu().numpy()  # (n, 17)
+                    if cf is not None and len(cf) > 0:
+                        pick = int(np.argmax(cf.mean(axis=1)))
+                        conf.append(cf[pick].astype(np.float32))
+                    else:
+                        pick = 0
+                        conf.append(np.zeros((17,), dtype=np.float32))
+
+                    pts = xy[pick].astype(np.float32)
+                    pts[:, 0] /= float(w)
+                    pts[:, 1] /= float(h)
+                    kpts.append(pts)
+
+        if t_ms and t_ms > 0:
+            base = float(start_s) if start_s is not None else 0.0
+            t_list.append(max(0.0, (t_ms / 1000.0) - base))
+        else:
+            t_list.append((kept - 1) / float(fps))
+
+    cap.release()
+
+    if not kpts:
+        return None
+
+    return (
+        np.asarray(t_list, dtype=np.float32),
+        np.asarray(kpts, dtype=np.float32),
+        np.asarray(conf, dtype=np.float32),
+    )
+
+
 def _extract_pose_mediapipe(
     video_path: Path,
     frame_stride: int,
@@ -381,6 +486,9 @@ def main() -> None:
     ap.add_argument("--split", default=None)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--device", default="cpu", help="device: cpu, 0 (GPU:0), 0,1 (GPU:0,1) etc")
+    ap.add_argument("--model", default="yolov8n-pose.pt")
+    ap.add_argument("--yolo-conf", type=float, default=0.5)
     args = ap.parse_args()
 
     config_path = Path(args.config)
@@ -402,6 +510,7 @@ def main() -> None:
 
     frame_stride = int(cfg["omnifall"]["frame_stride"])
     max_frames = int(cfg["omnifall"]["max_frames"])
+    pose_backend = str(cfg["omnifall"].get("pose_backend", "ultralytics"))
 
     try:
         from datasets import load_dataset
@@ -497,13 +606,27 @@ def main() -> None:
             start_s = None
             end_s = None
 
-        res = _extract_pose_mediapipe(
-            video_path,
-            frame_stride=frame_stride,
-            max_frames=max_frames,
-            start_s=start_s,
-            end_s=end_s,
-        )
+        if pose_backend == "ultralytics":
+            res = _extract_pose_ultralytics(
+                video_path,
+                frame_stride=frame_stride,
+                max_frames=max_frames,
+                start_s=start_s,
+                end_s=end_s,
+                model_name=args.model,
+                device=args.device,
+                conf_threshold=float(args.yolo_conf),
+            )
+        elif pose_backend == "mediapipe":
+            res = _extract_pose_mediapipe(
+                video_path,
+                frame_stride=frame_stride,
+                max_frames=max_frames,
+                start_s=start_s,
+                end_s=end_s,
+            )
+        else:
+            raise SystemExit(f"Unknown pose backend for OmniFall: {pose_backend}")
         if res is None:
             continue
         t_sec, kpts, conf = res

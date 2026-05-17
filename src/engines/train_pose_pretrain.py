@@ -5,16 +5,16 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
 
 from src.data_pipeline.omnifall_dataset import OmniFallPoseDataset
-from src.engines.common import compute_pos_weight, evaluate_classifier, save_checkpoint
+from src.engines.common import BinaryFocalLoss, compute_focal_alpha, evaluate_classifier, save_checkpoint
 from src.models.pose_model import TwoCamPoseClassifier
 from src.utils.config import load_yaml
 from src.utils.device import resolve_device
 from src.utils.jsonl import read_jsonl
 from src.utils.seed import set_global_seed
+from src.utils.train_logger import TrainLogger
 
 
 def _forward_pose(model: TwoCamPoseClassifier, batch, device: torch.device) -> torch.Tensor:
@@ -83,8 +83,8 @@ def main() -> None:
         num_channels=int(cfg["model"].get("num_channels", 3)),
     ).to(device)
 
-    pos_weight = compute_pos_weight([int(it.label) for it in train_ds.items]).to(device)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    alpha = compute_focal_alpha([int(it.label) for it in train_ds.items]).to(device)
+    criterion = BinaryFocalLoss(alpha=float(alpha.item()), gamma=2.0)
 
     optim = torch.optim.AdamW(
         model.parameters(),
@@ -96,22 +96,58 @@ def main() -> None:
     weights_dir = project_root / str(cfg["output"]["weights_dir"])
     out_path = weights_dir / str(cfg["output"]["ckpt_name"])
 
-    for epoch in range(int(cfg["train"]["max_epochs"])):
-        model.train()
-        for batch in train_loader:
-            y = batch["label"].to(device).float()
-            logits = _forward_pose(model, batch, device).view(-1)
-            loss = criterion(logits, y.view(-1))
-            optim.zero_grad(set_to_none=True)
-            loss.backward()
-            optim.step()
+    log_cfg = cfg.get("logging", {})
+    wandb_cfg = cfg.get("wandb", {})
+    log_dir = project_root / str(log_cfg.get("log_dir", "logs"))
+    run_name = str(log_cfg.get("run_name") or cfg["task"]["name"])
+    logger = TrainLogger(
+        log_dir=log_dir,
+        run_name=run_name,
+        save_csv=log_cfg.get("save_csv", True),
+        save_json=log_cfg.get("save_json", True),
+        wandb_cfg=wandb_cfg,
+        run_config=cfg,
+    )
 
-        val_res = evaluate_classifier(model, val_loader, device, criterion, _forward_pose)
-        print(f"[epoch {epoch+1}] val loss={val_res.loss:.4f} acc={val_res.acc:.4f} f1={val_res.f1:.4f}")
-        if val_res.f1 > best_f1:
-            best_f1 = val_res.f1
-            save_checkpoint(model, out_path, extra={"config": cfg})
-            print(f"  saved best -> {out_path}")
+    try:
+        for epoch in range(int(cfg["train"]["max_epochs"])):
+            model.train()
+            train_losses: list[float] = []
+            for batch in train_loader:
+                y = batch["label"].to(device).float()
+                logits = _forward_pose(model, batch, device).view(-1)
+                loss = criterion(logits, y.view(-1))
+                train_losses.append(float(loss.item()))
+                optim.zero_grad(set_to_none=True)
+                loss.backward()
+                optim.step()
+
+            train_loss = float(np.mean(train_losses) if train_losses else 0.0)
+            val_res = evaluate_classifier(model, val_loader, device, criterion, _forward_pose)
+            print(
+                f"[epoch {epoch+1}] train loss={train_loss:.4f} "
+                f"val loss={val_res.loss:.4f} acc={val_res.acc:.4f} f1={val_res.f1:.4f}"
+            )
+            is_best = val_res.f1 > best_f1
+            if is_best:
+                best_f1 = val_res.f1
+                save_checkpoint(model, out_path, extra={"config": cfg})
+                print(f"  saved best -> {out_path}")
+
+            logger.log(
+                {
+                    "epoch": epoch + 1,
+                    "train_loss": train_loss,
+                    "val_loss": val_res.loss,
+                    "val_acc": val_res.acc,
+                    "val_f1": val_res.f1,
+                    "lr": float(optim.param_groups[0]["lr"]),
+                    "is_best": is_best,
+                },
+                step=epoch + 1,
+            )
+    finally:
+        logger.close()
 
 
 if __name__ == "__main__":

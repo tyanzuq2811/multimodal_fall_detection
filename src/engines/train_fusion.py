@@ -82,7 +82,11 @@ def main() -> None:
 
     data_cfg = load_yaml(project_root / cfg["data_config"])
     processed_dir = project_root / Path(data_cfg["paths"]["processed_dir"])
-    manifest_path = processed_dir / "synced_windows" / "upfall_windows.jsonl"
+    cfg_manifest = data_cfg.get("upfall", {}).get("manifest_path")
+    if cfg_manifest:
+        manifest_path = project_root / Path(cfg_manifest)
+    else:
+        manifest_path = processed_dir / "synced_windows" / "upfall_windows.jsonl"
 
     train_subjects = [int(x) for x in data_cfg["split"]["train_subjects"]]
     val_subjects = [int(x) for x in data_cfg["split"]["val_subjects"]]

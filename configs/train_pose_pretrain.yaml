@@ -1,4 +1,4 @@
-data_config: configs/data_config.yaml
+data_config: configs/data_config_v2.yaml
 
 task:
   name: pose_pretrain
@@ -25,4 +25,18 @@ model:
 
 output:
   weights_dir: weights
-  ckpt_name: pose_pretrained_omnifall.pth
+  ckpt_name: pose_pretrain_omnifall_v2.pth
+
+logging:
+  log_dir: logs
+  run_name: pose_pretrain_v2
+  save_csv: true
+  save_json: true
+
+wandb:
+  enable: true
+  project: fall-detection
+  entity: null
+  tags: [pose, pretrain, v2]
+  mode: online
+  run_name: pose_pretrain_v2

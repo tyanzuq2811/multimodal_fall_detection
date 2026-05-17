@@ -411,6 +411,34 @@ Tác dụng:
 
 ### 11.5. Kết quả cuối cùng
 
+#### Pretrain OmniFall (v2)
+
+- Best epoch: **35**
+- Accuracy = **0.9933**
+- F1 = **0.9907**
+- Val loss = **0.0135**
+
+#### Fine-tune UP-Fall (validation subjects 9-10, v2)
+
+- Best epoch: **130**
+- Accuracy = **0.9622**
+- F1 = **0.9079**
+- Val loss = **0.0068**
+
+#### Fusion v2 (validation subjects 9-10)
+
+- Best epoch: **5**
+- Accuracy = **0.9727**
+- F1 = **0.9299**
+- Val loss = **0.0084**
+
+#### Fusion v2 test (subjects 11-12)
+
+- Accuracy = **0.9139**
+- Precision = **0.7079**
+- Recall = **0.9187**
+- F1 = **0.7996**
+
 #### Validation (subjects 2-10)
 
 - Best threshold: **0.9900**
@@ -481,7 +509,7 @@ Tác dụng:
 
 Nhánh Pose hiện tại đã đạt trạng thái có thể dùng để báo cáo và demo:
 
-- Checkpoint chính: `weights/pose_finetuned_upfall.pth`
+- Checkpoint chính: `weights/pose_finetuned_upfall_v2.pth`
 - Tensor Pose cuối cùng: **(B, 3, 60, 17)**
 - Pipeline đã xử lý được:
   - mất cân bằng lớp,

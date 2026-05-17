@@ -1,0 +1,55 @@
+paths:
+  raw_upfall_dir: data/raw/upfall
+  raw_omnifall_dir: data/raw/omnifall
+  processed_dir: data/processed
+  splits_dir: data/splits
+
+upfall:
+  cameras: [1, 2]
+  extract_subjects: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  imu:
+    sources:
+      - name: WristAccelerometer
+        axes: [x, y, z]
+      - name: BeltAccelerometer
+        axes: [x, y, z]
+  labels:
+    fall_activities: [1, 2, 3, 4, 5]
+    non_fall_activities: [6, 7, 8]
+
+  windows:
+    length_s: 2.0
+    stride_s: 0.5
+
+  target_lengths:
+    imu: 100
+    pose: 60
+
+  pose_cache_dir: data/processed/pose_features_v2/upfall
+  manifest_path: data/processed/pose_features_v2/upfall_windows_v2.jsonl
+
+  pose:
+    num_joints: 17
+    backend: ultralytics
+
+split:
+  train_subjects: [1, 2, 3, 4, 5, 6, 7, 8]
+  val_subjects: [9, 10]
+  test_subjects: [11, 12]
+
+omnifall:
+  hf_dataset: simplexsigil2/omnifall
+  hf_config: null
+  hf_split: train
+  label_field: label
+  path_field: path
+  start_field: start
+  end_field: end
+  local_video_root: data/raw/omnifall/media_h264
+  fall_values: [fall, fallen]
+  non_fall_values: ["*"]
+  frame_stride: 1
+  max_frames: 60
+  pose_backend: ultralytics
+  pose_dir: data/processed/pose_features_v2/omnifall
+  manifest_path: data/processed/pose_features_v2/omnifall_manifest_v2.jsonl

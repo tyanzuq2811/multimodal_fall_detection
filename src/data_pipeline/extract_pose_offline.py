@@ -30,7 +30,14 @@ def _read_csv_start_dt(csv_path: Path) -> datetime:
     return datetime.fromisoformat(first[0])
 
 
-def _extract_pose_ultralytics(zip_path: Path, csv_start_dt: datetime, model_name: str, device: str, frame_stride: int = 1):
+def _extract_pose_ultralytics(
+    zip_path: Path,
+    csv_start_dt: datetime,
+    model_name: str,
+    device: str,
+    frame_stride: int = 1,
+    conf_threshold: float = 0.5,
+):
     try:
         import cv2
     except ImportError as e:
@@ -66,7 +73,7 @@ def _extract_pose_ultralytics(zip_path: Path, csv_start_dt: datetime, model_name
             if h <= 0 or w <= 0:
                 continue
 
-            results = model.predict(source=img, verbose=False, device=device)
+            results = model(img, conf=conf_threshold, classes=[0], verbose=False, device=device)
             if not results:
                 continue
             r0 = results[0]
@@ -80,8 +87,11 @@ def _extract_pose_ultralytics(zip_path: Path, csv_start_dt: datetime, model_name
             xy = xy.detach().cpu().numpy()  # (n, 17, 2)
             if cf is not None:
                 cf = cf.detach().cpu().numpy()  # (n, 17)
-                pick = int(np.argmax(cf.mean(axis=1)))
-                conf[out_i] = cf[pick].astype(np.float32)
+                if len(cf) > 0:
+                    pick = int(np.argmax(cf.mean(axis=1)))
+                    conf[out_i] = cf[pick].astype(np.float32)
+                else:
+                    pick = 0
             else:
                 pick = 0
 
@@ -175,6 +185,9 @@ def main() -> None:
     raw_upfall_dir = project_root / Path(cfg["paths"]["raw_upfall_dir"])
     processed_dir = project_root / Path(cfg["paths"]["processed_dir"])
 
+    pose_root = cfg.get("upfall", {}).get("pose_cache_dir")
+    pose_root = project_root / Path(pose_root) if pose_root else None
+
     cameras = [int(x) for x in cfg["upfall"]["cameras"]]
     allowed_subjects = set(int(x) for x in cfg["upfall"].get("extract_subjects", []))
     backend = str(cfg["upfall"]["pose"].get("backend", "ultralytics"))
@@ -194,7 +207,14 @@ def main() -> None:
             if cam_id not in t.camera_zips:
                 continue
             zip_path = t.camera_zips[cam_id]
-            out_path = pose_cache_path(processed_dir, t.subject, t.activity, t.trial, cam_id)
+            out_path = pose_cache_path(
+                processed_dir,
+                t.subject,
+                t.activity,
+                t.trial,
+                cam_id,
+                pose_root=pose_root,
+            )
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if out_path.exists() and not args.overwrite:
                 skipped += 1

@@ -145,6 +145,10 @@ def main() -> None:
     ap.add_argument("--split", default="2-10", help="Subject range for val/test (e.g., 2-10)")
     ap.add_argument("--use-two-cameras", action="store_true", default=True)
     ap.add_argument("--output-dir", default="eval_threshold_output")
+    ap.add_argument("--batch-size", type=int, default=128)
+    ap.add_argument("--num-workers", type=int, default=4)
+    ap.add_argument("--device", default="auto", help="auto, cpu, or cuda")
+    ap.add_argument("--fixed-threshold", type=float, default=None, help="Optional fixed threshold for evaluation")
     args = ap.parse_args()
 
     config_path = Path(args.config)
@@ -152,7 +156,11 @@ def main() -> None:
     project_root = config_path.resolve().parent.parent
     processed_dir = project_root / Path(cfg["paths"]["processed_dir"])
 
-    manifest_path = processed_dir / "synced_windows" / "upfall_windows.jsonl"
+    cfg_manifest = cfg.get("upfall", {}).get("manifest_path")
+    if cfg_manifest:
+        manifest_path = project_root / Path(cfg_manifest)
+    else:
+        manifest_path = processed_dir / "synced_windows" / "upfall_windows.jsonl"
     if not manifest_path.exists():
         raise SystemExit(f"Manifest not found: {manifest_path}")
 
@@ -183,15 +191,20 @@ def main() -> None:
         require_pose=True,
     )
 
+    if str(args.device).lower() == "cpu":
+        device = torch.device("cpu")
+    elif str(args.device).lower() == "cuda":
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     val_loader = DataLoader(
         val_ds,
-        batch_size=128,
+        batch_size=int(args.batch_size),
         shuffle=False,
-        num_workers=4,
-        pin_memory=True,
+        num_workers=int(args.num_workers),
+        pin_memory=(device.type == "cuda"),
     )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load model
     ckpt_path = Path(args.ckpt)
@@ -260,6 +273,15 @@ def main() -> None:
     print(f"  Accuracy: {accuracy_score(labels, preds_default):.4f}")
     print(f"  Precision: {precision_score(labels, preds_default):.4f}")
     print(f"  Recall: {recall_score(labels, preds_default):.4f}")
+
+    if args.fixed_threshold is not None:
+        fixed_th = float(args.fixed_threshold)
+        preds_fixed = (probs >= fixed_th).astype(int)
+        print(f"\nMetrics at Fixed Threshold = {fixed_th:.4f}:")
+        print(f"  F1-Score: {f1_score(labels, preds_fixed):.4f}")
+        print(f"  Accuracy: {accuracy_score(labels, preds_fixed):.4f}")
+        print(f"  Precision: {precision_score(labels, preds_fixed):.4f}")
+        print(f"  Recall: {recall_score(labels, preds_fixed):.4f}")
 
     # Evaluate at optimal threshold
     preds_optimal = (probs >= results["best_threshold"]).astype(int)
