@@ -302,7 +302,7 @@ Nhận xét:
 - **Fine-tune UP-Fall (val 9-10)**: best epoch 130, acc 0.9622, F1 0.9079, val loss 0.0068.
 - **Threshold tuning (val 9-10)**: best threshold 0.72, best F1 0.9236.
 - **Fusion v2 val (9-10, epoch 5)**: acc 0.9727, F1 0.9299, val loss 0.0084.
-- **Fusion v2 test (11-12, th=0.5)**: acc 0.9139, F1 0.7996, precision 0.7079, recall 0.9187.
+- **Fusion v2 test (11-12, th=0.5)**: acc 0.9139, F1 0.7996, precision 0.7079, recall 0.9187, TP 441, FP 182, TN 1906, FN 39.
 - **Kết quả blind test v1** vẫn giữ nguyên theo bảng trên để đảm bảo đối chiếu nhất quán.
 
 Xếp hạng theo F1 trên tập validation:

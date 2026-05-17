@@ -438,6 +438,10 @@ Tác dụng:
 - Precision = **0.7079**
 - Recall = **0.9187**
 - F1 = **0.7996**
+- TP = **441**
+- FP = **182**
+- TN = **1906**
+- FN = **39**
 
 #### Validation (subjects 2-10)
 
